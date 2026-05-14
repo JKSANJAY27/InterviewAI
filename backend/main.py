@@ -52,6 +52,23 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     _sessions[session_id] = websocket
     logger.info("Session connected: %s  (total=%d)", session_id, len(_sessions))
 
+    from pipeline.asr import DeepgramASR
+    
+    # Callback to route ASR events back to the client or the next pipeline stage
+    def on_asr_event(msg_dict: dict):
+        event_type = msg_dict["type"]
+        event_obj = msg_dict["event"]
+        
+        # Fire-and-forget sending to client (since callback is synchronous)
+        if event_type == "asr_interim":
+            asyncio.create_task(websocket.send_json(event_obj.model_dump()))
+        elif event_type == "asr_final":
+            asyncio.create_task(websocket.send_json(event_obj.model_dump()))
+            # TODO: trigger LLM with the final text
+
+    asr = DeepgramASR(session_id, on_event=on_asr_event)
+    await asr.start()
+
     try:
         await websocket.send_json(
             {
@@ -64,8 +81,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # Receive raw bytes (audio) or JSON (control messages)
             data = await websocket.receive()
             if "bytes" in data:
-                # Audio chunk — will be routed to ASR pipeline
-                pass
+                # Audio chunk — push to ASR
+                await asr.push_audio(data["bytes"])
             elif "text" in data:
                 import json
                 msg = json.loads(data["text"])
@@ -73,6 +90,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         logger.info("Session disconnected: %s", session_id)
     finally:
+        await asr.stop()
         _sessions.pop(session_id, None)
 
 

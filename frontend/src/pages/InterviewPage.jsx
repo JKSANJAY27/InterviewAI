@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { useMicrophone } from '../hooks/useMicrophone'
 import './InterviewPage.css'
 
 const SESSION_ID = crypto.randomUUID()
@@ -60,7 +61,14 @@ function TranscriptBubble({ role, text }) {
 }
 
 export default function InterviewPage() {
-  const { connect, disconnect, sendJson, connected, on } = useWebSocket()
+  const { connect, disconnect, sendJson, sendBinary, connected, on } = useWebSocket()
+  
+  const handleAudioChunk = useCallback((buffer) => {
+    sendBinary(buffer)
+  }, [sendBinary])
+
+  const { startRecording, stopRecording, isRecording } = useMicrophone(handleAudioChunk)
+
   const [sessionState, setSessionState] = useState('idle')
   const [transcript, setTranscript] = useState([])
   const [interimText, setInterimText]  = useState('')
@@ -94,9 +102,22 @@ export default function InterviewPage() {
     }
   }, [transcript, streamingText, interimText])
 
+  useEffect(() => {
+    if (connected && !isRecording) {
+      startRecording()
+    } else if (!connected && isRecording) {
+      stopRecording()
+    }
+  }, [connected, isRecording, startRecording, stopRecording])
+
   const handleConnect = () => {
     connect(SESSION_ID)
     setSessionState('idle')
+  }
+
+  const handleDisconnect = () => {
+    stopRecording()
+    disconnect()
   }
 
   return (
@@ -118,7 +139,7 @@ export default function InterviewPage() {
               Start Interview
             </button>
           ) : (
-            <button className="btn btn--ghost" onClick={disconnect}>
+            <button className="btn btn--ghost" onClick={handleDisconnect}>
               End Session
             </button>
           )}
