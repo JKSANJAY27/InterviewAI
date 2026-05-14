@@ -1,0 +1,43 @@
+# Environment
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node
+node_modules/
+.next/
+out/
+*.local
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Session recordings (opt-in, not committed)
+backend/recordings/
+backend/data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Ollama model weights
+*.gguf
+*.bin
