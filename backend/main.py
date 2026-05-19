@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from contextlib import asynccontextmanager
@@ -53,9 +54,46 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     logger.info("Session connected: %s  (total=%d)", session_id, len(_sessions))
 
     from pipeline.asr import DeepgramASR
+    from pipeline.llm import OllamaLLM
+    from models.session import Session
+    from models.events import LLMTokenEvent, TurnCompleteEvent
+
+    chat_session = Session(session_id=session_id)
+    llm = OllamaLLM(session_id)
     
+    # Track the current LLM task so we can cancel it if interrupted
+    llm_task: asyncio.Task | None = None
+
+    async def run_llm(user_text: str):
+        # Notify frontend we are thinking
+        await websocket.send_json({"type": "status", "state": "thinking", "message": "Thinking..."})
+        
+        chat_session.start_turn()
+        # Add the user text to history
+        history = chat_session.get_history_for_llm() + [{"role": "user", "content": user_text}]
+        
+        full_response = ""
+        
+        # Stream response
+        await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
+        async for token in llm.generate_response(history):
+            full_response += token
+            event = LLMTokenEvent(token=token)
+            await websocket.send_json(event.model_dump())
+            
+        # Finish turn
+        chat_session.finish_turn(user_text=user_text, assistant_text=full_response)
+        
+        event = TurnCompleteEvent(
+            turn_id=chat_session.current_turn.turn_id if chat_session.current_turn else "unknown",
+            latency={},
+            full_response=full_response
+        )
+        await websocket.send_json(event.model_dump())
+
     # Callback to route ASR events back to the client or the next pipeline stage
     def on_asr_event(msg_dict: dict):
+        nonlocal llm_task
         event_type = msg_dict["type"]
         event_obj = msg_dict["event"]
         
@@ -64,7 +102,16 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             asyncio.create_task(websocket.send_json(event_obj.model_dump()))
         elif event_type == "asr_final":
             asyncio.create_task(websocket.send_json(event_obj.model_dump()))
-            # TODO: trigger LLM with the final text
+            
+            user_text = event_obj.text.strip()
+            if not user_text:
+                return
+                
+            # Cancel any ongoing LLM task to handle interruption
+            if llm_task and not llm_task.done():
+                llm_task.cancel()
+                
+            llm_task = asyncio.create_task(run_llm(user_text))
 
     asr = DeepgramASR(session_id, on_event=on_asr_event)
     await asr.start()
@@ -77,6 +124,17 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "message": "Connected. Ready to begin your interview.",
             }
         )
+        # Initial greeting from interviewer
+        initial_greeting = "Hello, thanks for joining me today. Could you start by telling me a little bit about your most recent project?"
+        chat_session.finish_turn(user_text="", assistant_text=initial_greeting)
+        
+        event = TurnCompleteEvent(
+            turn_id="initial",
+            latency={},
+            full_response=initial_greeting
+        )
+        await websocket.send_json(event.model_dump())
+
         while True:
             # Receive raw bytes (audio) or JSON (control messages)
             data = await websocket.receive()
@@ -91,6 +149,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         logger.info("Session disconnected: %s", session_id)
     finally:
         await asr.stop()
+        if llm_task:
+            llm_task.cancel()
         _sessions.pop(session_id, None)
 
 
