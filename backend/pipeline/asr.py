@@ -40,13 +40,10 @@ class DeepgramASR:
         self.connection.on(LiveTranscriptionEvents.Close, self._on_close)
 
         options = LiveOptions(
-            model="nova-3",
+            model="nova-2",
             language="en-US",
             smart_format=True,
-            encoding="webm", # matches browser's MediaRecorder config
-            sample_rate=16000,
             interim_results=True,
-            endpointing=300, # 300ms of silence triggers endpoint
         )
         
         if await self.connection.start(options) is False:

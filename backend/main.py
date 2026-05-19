@@ -154,7 +154,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         while True:
             # Receive raw bytes (audio) or JSON (control messages)
             data = await websocket.receive()
-            if "bytes" in data:
+            if data["type"] == "websocket.disconnect":
+                logger.info("WebSocket disconnect received for session %s", session_id)
+                break
+            elif "bytes" in data:
                 # Audio chunk — push to ASR
                 await asr.push_audio(data["bytes"])
             elif "text" in data:
