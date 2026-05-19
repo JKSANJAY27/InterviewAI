@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { useMicrophone } from '../hooks/useMicrophone'
+import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import './InterviewPage.css'
 
 const SESSION_ID = crypto.randomUUID()
@@ -68,6 +69,7 @@ export default function InterviewPage() {
   }, [sendBinary])
 
   const { startRecording, stopRecording, isRecording } = useMicrophone(handleAudioChunk)
+  const { playBase64Chunk, stopPlaying } = useAudioPlayer()
 
   const [sessionState, setSessionState] = useState('idle')
   const [transcript, setTranscript] = useState([])
@@ -78,7 +80,11 @@ export default function InterviewPage() {
   useEffect(() => {
     on('status', (msg) => setSessionState(msg.state))
 
-    on('transcript_interim', (msg) => setInterimText(msg.text))
+    on('transcript_interim', (msg) => {
+      setInterimText(msg.text)
+      // Interrupt playback if user starts speaking
+      stopPlaying()
+    })
 
     on('transcript_final', (msg) => {
       setInterimText('')
@@ -94,7 +100,11 @@ export default function InterviewPage() {
       setStreamingText('')
       setSessionState('idle')
     })
-  }, [on])
+
+    on('audio_response', (msg) => {
+      playBase64Chunk(msg.data)
+    })
+  }, [on, stopPlaying, playBase64Chunk])
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -117,6 +127,7 @@ export default function InterviewPage() {
 
   const handleDisconnect = () => {
     stopRecording()
+    stopPlaying()
     disconnect()
   }
 

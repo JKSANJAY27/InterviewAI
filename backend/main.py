@@ -55,11 +55,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     from pipeline.asr import DeepgramASR
     from pipeline.llm import OllamaLLM
+    from pipeline.tts import ElevenLabsTTS
     from models.session import Session
-    from models.events import LLMTokenEvent, TurnCompleteEvent
+    from models.events import LLMTokenEvent, TurnCompleteEvent, AudioResponseEvent
 
     chat_session = Session(session_id=session_id)
     llm = OllamaLLM(session_id)
+    tts = ElevenLabsTTS(session_id)
     
     # Track the current LLM task so we can cancel it if interrupted
     llm_task: asyncio.Task | None = None
@@ -74,12 +76,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         
         full_response = ""
         
-        # Stream response
+        # Async generator that broadcasts LLM tokens while feeding them to TTS
+        async def text_streamer():
+            nonlocal full_response
+            async for token in llm.generate_response(history):
+                full_response += token
+                event = LLMTokenEvent(token=token)
+                await websocket.send_json(event.model_dump())
+                yield token
+
+        # Stream audio from TTS
         await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
-        async for token in llm.generate_response(history):
-            full_response += token
-            event = LLMTokenEvent(token=token)
+        chunk_idx = 0
+        async for audio_bytes in tts.generate_audio(text_streamer()):
+            import base64
+            event = AudioResponseEvent(
+                data=base64.b64encode(audio_bytes).decode("utf-8"),
+                chunk_index=chunk_idx
+            )
             await websocket.send_json(event.model_dump())
+            chunk_idx += 1
             
         # Finish turn
         chat_session.finish_turn(user_text=user_text, assistant_text=full_response)
