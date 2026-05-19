@@ -169,6 +169,7 @@ export default function InterviewPage() {
         <AnimatePresence initial={false}>
           {transcript.length === 0 && !connected && (
             <motion.div
+              key="empty-state"
               className="transcript-empty"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -180,17 +181,18 @@ export default function InterviewPage() {
           )}
 
           {transcript.map((entry, i) => (
-            <TranscriptBubble key={i} role={entry.role} text={entry.text} />
+            <TranscriptBubble key={`entry-${i}`} role={entry.role} text={entry.text} />
           ))}
 
           {/* Streaming LLM response */}
           {streamingText && (
-            <TranscriptBubble role="assistant" text={streamingText + '▌'} />
+            <TranscriptBubble key="streaming-state" role="assistant" text={streamingText + '▌'} />
           )}
 
           {/* Interim ASR */}
           {interimText && (
             <motion.div
+              key="interim-state"
               className="bubble bubble--interim"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

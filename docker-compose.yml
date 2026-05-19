@@ -5,9 +5,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: interviewai-backend
+    container_name: interviewai-backend-2
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     env_file:
       - .env
     environment:
@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./backend:/app
-      - backend_data:/app/data
+      - backend_data_2:/app/data
 
 volumes:
-  backend_data:
+  backend_data_2:

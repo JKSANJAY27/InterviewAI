@@ -65,7 +65,7 @@ class DeepgramASR:
         if self._is_active and self.connection:
             await self.connection.send(chunk)
 
-    def _on_message(self, *args, **kwargs):
+    async def _on_message(self, *args, **kwargs):
         """Handle incoming Deepgram transcriptions."""
         # The Python SDK passes the result object as the second arg usually
         result: LiveResultResponse = kwargs.get("result") or args[1]
@@ -94,10 +94,10 @@ class DeepgramASR:
             )
             self.on_event({"type": "asr_interim", "event": event})
 
-    def _on_error(self, *args, **kwargs):
+    async def _on_error(self, *args, **kwargs):
         error = kwargs.get("error") or args[1]
         logger.error("[%s] Deepgram ASR Error: %s", self.session_id, error)
 
-    def _on_close(self, *args, **kwargs):
+    async def _on_close(self, *args, **kwargs):
         self._is_active = False
         logger.info("[%s] Deepgram connection closed", self.session_id)

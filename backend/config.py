@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # TTS
     elevenlabs_api_key: str = Field(..., env="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str = Field(
-        "21m00Tcm4TlvDq8ikWAM", env="ELEVENLABS_VOICE_ID"
+        "pNInz6obpgDQGcFmaJgB", env="ELEVENLABS_VOICE_ID"
     )
 
     # LLM
