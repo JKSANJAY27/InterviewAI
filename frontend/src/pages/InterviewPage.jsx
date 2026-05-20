@@ -1,11 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useWebSocket } from '../hooks/useWebSocket'
-import { useMicrophone } from '../hooks/useMicrophone'
-import { useAudioPlayer } from '../hooks/useAudioPlayer'
+import { useInterview } from '../context/InterviewContext'
 import './InterviewPage.css'
-
-const SESSION_ID = crypto.randomUUID()
 
 const STATE_LABELS = {
   idle:         'Ready',
@@ -62,74 +58,23 @@ function TranscriptBubble({ role, text }) {
 }
 
 export default function InterviewPage() {
-  const { connect, disconnect, sendJson, sendBinary, connected, on } = useWebSocket()
-  
-  const handleAudioChunk = useCallback((buffer) => {
-    sendBinary(buffer)
-  }, [sendBinary])
+  const {
+    sessionState,
+    transcript,
+    interimText,
+    streamingText,
+    connected,
+    handleConnect,
+    handleDisconnect,
+  } = useInterview()
 
-  const { startRecording, stopRecording, isRecording } = useMicrophone(handleAudioChunk)
-  const { playBase64Chunk, stopPlaying } = useAudioPlayer()
-
-  const [sessionState, setSessionState] = useState('idle')
-  const [transcript, setTranscript] = useState([])
-  const [interimText, setInterimText]  = useState('')
-  const [streamingText, setStreamingText] = useState('')
   const transcriptRef = useRef(null)
-
-  useEffect(() => {
-    on('status', (msg) => setSessionState(msg.state))
-
-    on('transcript_interim', (msg) => {
-      setInterimText(msg.text)
-      // Interrupt playback if user starts speaking
-      stopPlaying()
-    })
-
-    on('transcript_final', (msg) => {
-      setInterimText('')
-      setTranscript(prev => [...prev, { role: 'user', text: msg.text }])
-    })
-
-    on('llm_token', (msg) => {
-      setStreamingText(prev => prev + msg.token)
-    })
-
-    on('turn_complete', (msg) => {
-      setTranscript(prev => [...prev, { role: 'assistant', text: msg.full_response }])
-      setStreamingText('')
-      setSessionState('idle')
-    })
-
-    on('audio_response', (msg) => {
-      playBase64Chunk(msg.data)
-    })
-  }, [on, stopPlaying, playBase64Chunk])
 
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
     }
   }, [transcript, streamingText, interimText])
-
-  useEffect(() => {
-    if (connected && !isRecording) {
-      startRecording()
-    } else if (!connected && isRecording) {
-      stopRecording()
-    }
-  }, [connected, isRecording, startRecording, stopRecording])
-
-  const handleConnect = () => {
-    connect(SESSION_ID)
-    setSessionState('idle')
-  }
-
-  const handleDisconnect = () => {
-    stopRecording()
-    stopPlaying()
-    disconnect()
-  }
 
   return (
     <main className="interview-page">

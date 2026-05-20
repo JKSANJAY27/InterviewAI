@@ -20,6 +20,10 @@
   margin-top: 6px;
 }
 
+.dashboard-error {
+  align-self: flex-start;
+}
+
 /* ── Stat cards ──────────────────────────────────────────────── */
 .dashboard-grid {
   display: grid;
@@ -45,28 +49,72 @@
   color: var(--accent-light);
 }
 
-/* ── Chart placeholders ──────────────────────────────────────── */
+/* ── Chart Cards ─────────────────────────────────────────────── */
 .dashboard-charts {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+  align-items: stretch;
 }
-.chart-placeholder {
+.chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  min-height: 380px;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.chart-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.turn-selector {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  transition: all var(--duration) var(--ease);
+}
+.turn-selector:hover {
+  border-color: var(--border-focus);
+}
+
+.chart-container {
+  flex: 1;
+  position: relative;
+  min-height: 250px;
+}
+
+.chart-empty {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 220px;
-  border: 2px dashed var(--border);
-  background: var(--bg-surface);
-}
-.chart-placeholder__label {
-  font-size: 14px;
-  font-weight: 500;
+  height: 100%;
+  gap: 8px;
   color: var(--text-secondary);
 }
-.chart-placeholder__hint {
+
+.chart-empty .hint {
   font-size: 12px;
   color: var(--text-muted);
+  text-align: center;
 }

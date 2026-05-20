@@ -93,8 +93,9 @@ class LatencyBudget(BaseModel):
 
     @property
     def total_latency(self) -> Optional[float]:
-        if self.speech_start_ms and self.audio_playback_ms:
-            return self.audio_playback_ms - self.speech_start_ms
+        playback_time = self.audio_playback_ms or self.tts_first_audio_ms
+        if self.speech_start_ms and playback_time:
+            return playback_time - self.speech_start_ms
         return None
 
     def to_breakdown(self) -> dict[str, Any]:

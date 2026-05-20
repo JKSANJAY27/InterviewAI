@@ -1,6 +1,7 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
 import InterviewPage from './pages/InterviewPage'
 import DashboardPage from './pages/DashboardPage'
+import { InterviewProvider } from './context/InterviewContext'
 
 function Nav() {
   return (
@@ -27,12 +28,14 @@ function Nav() {
 
 export default function App() {
   return (
-    <div className="page">
-      <Nav />
-      <Routes>
-        <Route path="/" element={<InterviewPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-      </Routes>
-    </div>
+    <InterviewProvider>
+      <div className="page">
+        <Nav />
+        <Routes>
+          <Route path="/" element={<InterviewPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+        </Routes>
+      </div>
+    </InterviewProvider>
   )
 }
