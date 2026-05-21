@@ -57,6 +57,65 @@ function TranscriptBubble({ role, text }) {
   )
 }
 
+const INTERVIEW_TYPES = [
+  {
+    id: 'general',
+    name: 'General Technical',
+    desc: 'Core computer science concepts, basic data structures, and multi-disciplinary software engineering.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    )
+  },
+  {
+    id: 'system_design',
+    name: 'System Design',
+    desc: 'Large-scale distributed systems, microservices, databases, load balancing, and performance tradeoffs.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    )
+  },
+  {
+    id: 'coding',
+    name: 'Coding / Algorithmic',
+    desc: 'Data structures, algorithms, runtime & space complexity analysis, and strict adherence to clean code.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="16 18 22 12 16 6" />
+        <polyline points="8 6 2 12 8 18" />
+      </svg>
+    )
+  },
+  {
+    id: 'frontend',
+    name: 'Frontend Architecture',
+    desc: 'SPAs, framework specifics (React/Vite), performance tuning, browser mechanics, state, and responsive styling.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a10 10 0 0 0-10 10c0 5.523 4.477 10 10 10a9.98 9.98 0 0 0 8-4h-4a2 2 0 1 1 0-4h4.41a9.988 9.988 0 0 0-.41-2h-3a2 2 0 1 1 0-4h3.41A9.97 9.97 0 0 0 12 2z"/>
+      </svg>
+    )
+  },
+  {
+    id: 'behavioral',
+    name: 'Behavioral & Culture',
+    desc: 'Conflict resolution, leadership situations, execution, project delivery, collaboration, and growth path.',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    )
+  }
+]
+
 export default function InterviewPage() {
   const {
     sessionState,
@@ -64,6 +123,10 @@ export default function InterviewPage() {
     interimText,
     streamingText,
     connected,
+    interviewType,
+    setInterviewType,
+    customInstructions,
+    setCustomInstructions,
     handleConnect,
     handleDisconnect,
   } = useInterview()
@@ -109,42 +172,89 @@ export default function InterviewPage() {
         </div>
       </aside>
 
-      {/* Right — Transcript */}
+      {/* Right — Transcript / Settings panel */}
       <section className="interview-transcript" ref={transcriptRef}>
-        <AnimatePresence initial={false}>
-          {transcript.length === 0 && !connected && (
+        <AnimatePresence initial={false} mode="wait">
+          {transcript.length === 0 && !connected ? (
             <motion.div
-              key="empty-state"
-              className="transcript-empty"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              key="setup-state"
+              className="setup-container"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
             >
-              <p>Press <strong>Start Interview</strong> to begin.</p>
-              <p>Your interviewer will introduce themselves and ask the first question.</p>
+              <div className="setup-card">
+                <div className="setup-header">
+                  <h2 className="setup-title">Personalize Your Interview</h2>
+                  <p className="setup-subtitle">
+                    Select a focus category and supply directives to customize the interviewer's style.
+                  </p>
+                </div>
+
+                <div className="setup-section">
+                  <label className="section-label">1. Focus Category</label>
+                  <div className="type-grid">
+                    {INTERVIEW_TYPES.map((t) => (
+                      <div
+                        key={t.id}
+                        className={`type-card ${interviewType === t.id ? 'active' : ''}`}
+                        onClick={() => setInterviewType(t.id)}
+                      >
+                        <div className="type-icon-wrapper">
+                          {t.icon}
+                        </div>
+                        <div className="type-info">
+                          <span className="type-name">{t.name}</span>
+                          <span className="type-desc">{t.desc}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="setup-section">
+                  <label className="section-label">2. Custom Focus & Directives (Optional)</label>
+                  <textarea
+                    className="custom-textarea"
+                    placeholder="e.g., 'Act as a principal engineer at Netflix. Challenge my choices on data modeling and caching.' or 'Evaluate my frontend skills specifically around hydration and layout shifts.'"
+                    value={customInstructions}
+                    onChange={(e) => setCustomInstructions(e.target.value.slice(0, 500))}
+                  />
+                  <div className="char-count">
+                    {customInstructions.length}/500 characters
+                  </div>
+                </div>
+
+                <button className="btn btn--primary setup-start-btn" onClick={handleConnect}>
+                  Start Tailored Session
+                </button>
+              </div>
             </motion.div>
-          )}
+          ) : (
+            <div className="transcript-list">
+              {transcript.map((entry, i) => (
+                <TranscriptBubble key={`entry-${i}`} role={entry.role} text={entry.text} />
+              ))}
 
-          {transcript.map((entry, i) => (
-            <TranscriptBubble key={`entry-${i}`} role={entry.role} text={entry.text} />
-          ))}
+              {/* Streaming LLM response */}
+              {streamingText && (
+                <TranscriptBubble key="streaming-state" role="assistant" text={streamingText + '▌'} />
+              )}
 
-          {/* Streaming LLM response */}
-          {streamingText && (
-            <TranscriptBubble key="streaming-state" role="assistant" text={streamingText + '▌'} />
-          )}
-
-          {/* Interim ASR */}
-          {interimText && (
-            <motion.div
-              key="interim-state"
-              className="bubble bubble--interim"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-            >
-              <span className="bubble__role">You (listening…)</span>
-              <p className="bubble__text">{interimText}</p>
-            </motion.div>
+              {/* Interim ASR */}
+              {interimText && (
+                <motion.div
+                  key="interim-state"
+                  className="bubble bubble--interim"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                >
+                  <span className="bubble__role">You (listening…)</span>
+                  <p className="bubble__text">{interimText}</p>
+                </motion.div>
+              )}
+            </div>
           )}
         </AnimatePresence>
       </section>

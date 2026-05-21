@@ -20,6 +20,8 @@ export function InterviewProvider({ children }) {
   const [transcript, setTranscript] = useState([])
   const [interimText, setInterimText] = useState('')
   const [streamingText, setStreamingText] = useState('')
+  const [interviewType, setInterviewType] = useState('general')
+  const [customInstructions, setCustomInstructions] = useState('')
 
   const { connect, disconnect, sendJson, sendBinary, connected, on } = useWebSocket()
 
@@ -66,6 +68,16 @@ export function InterviewProvider({ children }) {
     }
   }, [connected, isRecording, startRecording, stopRecording])
 
+  useEffect(() => {
+    if (connected) {
+      sendJson({
+        type: 'session_config',
+        interview_type: interviewType,
+        custom_instructions: customInstructions,
+      })
+    }
+  }, [connected, sendJson, interviewType, customInstructions])
+
   const handleConnect = useCallback(() => {
     connect(sessionId)
     setSessionState('idle')
@@ -97,6 +109,10 @@ export function InterviewProvider({ children }) {
         interimText,
         streamingText,
         connected,
+        interviewType,
+        setInterviewType,
+        customInstructions,
+        setCustomInstructions,
         handleConnect,
         handleDisconnect,
       }}

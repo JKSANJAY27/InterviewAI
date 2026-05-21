@@ -28,6 +28,8 @@ class Session:
     conversation_history: list[dict] = field(default_factory=list)
     current_turn: Optional[Turn] = None
     total_turns: int = 0
+    interview_type: str = "general"
+    custom_instructions: str = ""
 
     def start_turn(self) -> Turn:
         self.current_turn = Turn()

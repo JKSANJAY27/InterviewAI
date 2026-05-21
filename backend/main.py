@@ -111,7 +111,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         async def text_streamer():
             nonlocal full_response
             is_first_token = True
-            async for token in llm.generate_response(history):
+            async for token in llm.generate_response(
+                history,
+                interview_type=chat_session.interview_type,
+                custom_instructions=chat_session.custom_instructions
+            ):
                 if is_first_token:
                     tracker.record_llm_first_token(session_id)
                     is_first_token = False
@@ -202,16 +206,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "message": "Connected. Ready to begin your interview.",
             }
         )
-        # Initial greeting from interviewer
-        initial_greeting = "Hello, thanks for joining me today. Could you start by telling me a little bit about your most recent project?"
-        chat_session.finish_turn(user_text="", assistant_text=initial_greeting)
-        
-        event = TurnCompleteEvent(
-            turn_id="initial",
-            latency={},
-            full_response=initial_greeting
-        )
-        await websocket.send_json(event.model_dump())
 
         while True:
             # Receive raw bytes (audio) or JSON (control messages)
@@ -226,6 +220,45 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 import json
                 msg = json.loads(data["text"])
                 logger.debug("Control message: %s", msg.get("type"))
+                if msg.get("type") == "session_config":
+                    chat_session.interview_type = msg.get("interview_type", "general")
+                    chat_session.custom_instructions = msg.get("custom_instructions", "")
+                    logger.info("[%s] Configured session: type=%s, instructions=%s", session_id, chat_session.interview_type, chat_session.custom_instructions)
+                    
+                    # Personalized initial greetings
+                    greetings = {
+                        "general": "Hello! Thank you for joining me today. Could you start by telling me a little bit about your engineering background and your most recent project?",
+                        "system_design": "Hello! Thanks for joining me today. Let's design a high-scale real-time collaborative platform. How would you approach the overall architecture and data synchronization tradeoffs?",
+                        "coding": "Hello! Thanks for engineering today. We'll be working on a coding and algorithms optimization problem together. To start off, what is your preferred coding language and how do you think about time and space complexity tradeoffs?",
+                        "frontend": "Hello! Welcome to the frontend engineering interview. Let's build a highly responsive telemetry dashboard. How would you approach state modularity and minimizing browser repaints under constant data streams?",
+                        "behavioral": "Hello! Thanks for meeting with me today. Let's discuss some of your past engineering and leadership experiences. Could you start by walking me through a time when you had to resolve a high-stress team conflict or a severe production outage?"
+                    }
+                    initial_greeting = greetings.get(chat_session.interview_type, greetings["general"])
+                    chat_session.finish_turn(user_text="", assistant_text=initial_greeting)
+                    
+                    event = TurnCompleteEvent(
+                        turn_id="initial",
+                        latency={},
+                        full_response=initial_greeting
+                    )
+                    await websocket.send_json(event.model_dump())
+
+                    # Stream initial greeting voice audio using ElevenLabs
+                    async def greeting_text_streamer():
+                        yield initial_greeting
+
+                    await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
+                    chunk_idx = 0
+                    async for audio_bytes in tts.generate_audio(greeting_text_streamer()):
+                        import base64
+                        event = AudioResponseEvent(
+                            data=base64.b64encode(audio_bytes).decode("utf-8"),
+                            chunk_index=chunk_idx
+                        )
+                        await websocket.send_json(event.model_dump())
+                        chunk_idx += 1
+                    
+                    await websocket.send_json({"type": "status", "state": "idle", "message": "Ready"})
     except WebSocketDisconnect:
         logger.info("Session disconnected: %s", session_id)
     finally:
