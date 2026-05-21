@@ -67,8 +67,8 @@ class OllamaLLM:
         
         try:
             # CPU-based Ollama execution can be slow for first-time prompt evaluation.
-            # We increase timeout to 60.0s to prevent premature read timeouts.
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # We increase timeout to 180.0s to prevent premature read timeouts.
+            async with httpx.AsyncClient(timeout=180.0) as client:
                 async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():

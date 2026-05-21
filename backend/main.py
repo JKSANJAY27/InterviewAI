@@ -95,76 +95,96 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         llm_task = asyncio.create_task(run_llm(user_text))
 
     async def run_llm(user_text: str):
-        # Notify frontend we are thinking
-        await websocket.send_json({"type": "status", "state": "thinking", "message": "Thinking..."})
-        
-        if chat_session.current_turn is None:
-            chat_session.start_turn()
-            tracker.start_turn(session_id, chat_session.current_turn.turn_id)
+        try:
+            # Notify frontend we are thinking
+            await websocket.send_json({"type": "status", "state": "thinking", "message": "Thinking..."})
             
-        # Add the user text to history
-        history = chat_session.get_history_for_llm() + [{"role": "user", "content": user_text}]
-        
-        full_response = ""
-        
-        # Async generator that broadcasts LLM tokens while feeding them to TTS
-        async def text_streamer():
-            nonlocal full_response
-            is_first_token = True
-            async for token in llm.generate_response(
-                history,
-                interview_type=chat_session.interview_type,
-                custom_instructions=chat_session.custom_instructions
-            ):
-                if is_first_token:
-                    tracker.record_llm_first_token(session_id)
-                    is_first_token = False
+            if chat_session.current_turn is None:
+                chat_session.start_turn()
+                tracker.start_turn(session_id, chat_session.current_turn.turn_id)
                 
-                # Check for sentence boundary heuristically or use your existing sentence detector if available
-                if token and any(p in token for p in [".", "?", "!"]):
-                    tracker.record_llm_first_sentence(session_id)
-                
-                full_response += token
-                event = LLMTokenEvent(token=token)
-                await websocket.send_json(event.model_dump())
-                yield token
+            # Add the user text to history
+            history = chat_session.get_history_for_llm() + [{"role": "user", "content": user_text}]
+            
+            full_response = ""
+            
+            # Async generator that broadcasts LLM tokens while feeding them to TTS
+            async def text_streamer():
+                nonlocal full_response
+                is_first_token = True
+                async for token in llm.generate_response(
+                    history,
+                    interview_type=chat_session.interview_type,
+                    custom_instructions=chat_session.custom_instructions
+                ):
+                    if is_first_token:
+                        tracker.record_llm_first_token(session_id)
+                        is_first_token = False
+                    
+                    # Check for sentence boundary heuristically or use your existing sentence detector if available
+                    if token and any(p in token for p in [".", "?", "!"]):
+                        tracker.record_llm_first_sentence(session_id)
+                    
+                    full_response += token
+                    event = LLMTokenEvent(token=token)
+                    await websocket.send_json(event.model_dump())
+                    yield token
 
-        # Stream audio from TTS
-        await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
-        chunk_idx = 0
-        tracker.record_tts_request(session_id)
-        
-        async for audio_bytes in tts.generate_audio(text_streamer()):
-            import base64
-            if chunk_idx == 0:
-                tracker.record_tts_first_audio(session_id)
+            # Stream audio from TTS
+            await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
+            chunk_idx = 0
+            tracker.record_tts_request(session_id)
+            
+            async for audio_bytes in tts.generate_audio(text_streamer()):
+                import base64
+                if chunk_idx == 0:
+                    tracker.record_tts_first_audio(session_id)
+                    
+                event = AudioResponseEvent(
+                    data=base64.b64encode(audio_bytes).decode("utf-8"),
+                    chunk_index=chunk_idx
+                )
+                await websocket.send_json(event.model_dump())
+                chunk_idx += 1
                 
-            event = AudioResponseEvent(
-                data=base64.b64encode(audio_bytes).decode("utf-8"),
-                chunk_index=chunk_idx
+            current_turn_id = chat_session.current_turn.turn_id if chat_session.current_turn else "unknown"
+            
+            # Finish turn
+            chat_session.finish_turn(user_text=user_text, assistant_text=full_response)
+            
+            budget = tracker.finish_turn(session_id)
+            if budget:
+                budget.turn_id = current_turn_id
+                
+            latency_dict = budget.to_breakdown() if budget else {}
+            if budget:
+                await store.save_turn(budget)
+            
+            event = TurnCompleteEvent(
+                turn_id=current_turn_id,
+                latency=latency_dict,
+                full_response=full_response
             )
             await websocket.send_json(event.model_dump())
-            chunk_idx += 1
+        except asyncio.CancelledError:
+            logger.info("[%s] LLM/TTS generation task cancelled/interrupted by user speech", session_id)
+            interrupted_text = full_response.strip() + "..." if full_response.strip() else "[Interrupted]"
+            current_turn_id = chat_session.current_turn.turn_id if chat_session.current_turn else "interrupted"
             
-        current_turn_id = chat_session.current_turn.turn_id if chat_session.current_turn else "unknown"
-        
-        # Finish turn
-        chat_session.finish_turn(user_text=user_text, assistant_text=full_response)
-        
-        budget = tracker.finish_turn(session_id)
-        if budget:
-            budget.turn_id = current_turn_id
+            # Save the partial response generated so far to the session history
+            chat_session.finish_turn(user_text=user_text, assistant_text=interrupted_text)
             
-        latency_dict = budget.to_breakdown() if budget else {}
-        if budget:
-            await store.save_turn(budget)
-        
-        event = TurnCompleteEvent(
-            turn_id=current_turn_id,
-            latency=latency_dict,
-            full_response=full_response
-        )
-        await websocket.send_json(event.model_dump())
+            # Send TurnCompleteEvent so client commits the partial response to its transcript
+            event = TurnCompleteEvent(
+                turn_id=current_turn_id,
+                latency={},
+                full_response=interrupted_text
+            )
+            await websocket.send_json(event.model_dump())
+            
+            # Ensure we reset status back to idle
+            await websocket.send_json({"type": "status", "state": "idle", "message": "Ready"})
+            raise
 
     # Callback to route ASR events back to the client or the next pipeline stage
     def on_asr_event(msg_dict: dict):
@@ -172,6 +192,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         event_type = msg_dict["type"]
         event_obj = msg_dict["event"]
         
+        # Immediate interruption: cancel active LLM generation upon detecting user speech
+        if llm_task and not llm_task.done():
+            logger.info("[%s] Immediate interruption: cancelling active LLM generation", session_id)
+            llm_task.cancel()
+            
         # Fire-and-forget sending to client (since callback is synchronous)
         if event_type == "asr_interim":
             # If no current turn, start one to track speech start

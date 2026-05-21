@@ -33,16 +33,40 @@ export function InterviewProvider({ children }) {
   const { playBase64Chunk, stopPlaying } = useAudioPlayer()
 
   useEffect(() => {
-    on('status', (msg) => setSessionState(msg.state))
+    on('status', (msg) => {
+      console.log('[InterviewContext] status event:', msg)
+      setSessionState(msg.state)
+    })
 
     on('transcript_interim', (msg) => {
+      console.log('[InterviewContext] transcript_interim event:', msg)
       setInterimText(msg.text)
       stopPlaying()
     })
 
     on('transcript_final', (msg) => {
+      console.log('[InterviewContext] transcript_final event:', msg)
+      const cleanedText = (msg.text || '').trim()
+      if (!cleanedText) return
+
       setInterimText('')
-      setTranscript((prev) => [...prev, { role: 'user', text: msg.text }])
+      setTranscript((prev) => {
+        console.log('[InterviewContext] prev transcript state before final:', prev)
+        if (prev.length > 0 && prev[prev.length - 1].role === 'user') {
+          const last = prev[prev.length - 1]
+          const updatedLast = {
+            ...last,
+            text: (last.text + ' ' + cleanedText).trim()
+          }
+          const nextTranscript = [...prev.slice(0, -1), updatedLast]
+          console.log('[InterviewContext] merged user transcript bubble:', nextTranscript)
+          return nextTranscript
+        } else {
+          const nextTranscript = [...prev, { role: 'user', text: cleanedText }]
+          console.log('[InterviewContext] created new user transcript bubble:', nextTranscript)
+          return nextTranscript
+        }
+      })
     })
 
     on('llm_token', (msg) => {
@@ -50,7 +74,12 @@ export function InterviewProvider({ children }) {
     })
 
     on('turn_complete', (msg) => {
-      setTranscript((prev) => [...prev, { role: 'assistant', text: msg.full_response }])
+      console.log('[InterviewContext] turn_complete event:', msg)
+      setTranscript((prev) => {
+        const nextTranscript = [...prev, { role: 'assistant', text: msg.full_response }]
+        console.log('[InterviewContext] transcript state after turn complete:', nextTranscript)
+        return nextTranscript
+      })
       setStreamingText('')
       setSessionState('idle')
     })
