@@ -52,20 +52,44 @@ export function InterviewProvider({ children }) {
       setInterimText('')
       setTranscript((prev) => {
         console.log('[InterviewContext] prev transcript state before final:', prev)
-        if (prev.length > 0 && prev[prev.length - 1].role === 'user') {
-          const last = prev[prev.length - 1]
-          const updatedLast = {
-            ...last,
-            text: (last.text + ' ' + cleanedText).trim()
+
+        // Smart-merge: find the last user bubble in the entire transcript.
+        // We merge into it as long as there is NO real (non-interrupted) assistant
+        // response after it. This keeps speech together even if [Interrupted]
+        // placeholder bubbles were interspersed.
+        let lastUserIdx = -1
+        for (let i = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === 'user') {
+            lastUserIdx = i
+            break
           }
-          const nextTranscript = [...prev.slice(0, -1), updatedLast]
-          console.log('[InterviewContext] merged user transcript bubble:', nextTranscript)
-          return nextTranscript
-        } else {
-          const nextTranscript = [...prev, { role: 'user', text: cleanedText }]
-          console.log('[InterviewContext] created new user transcript bubble:', nextTranscript)
-          return nextTranscript
         }
+
+        if (lastUserIdx !== -1) {
+          const messagesAfterUser = prev.slice(lastUserIdx + 1)
+          const hasRealAssistantResponse = messagesAfterUser.some(
+            (m) => m.role === 'assistant' && m.text !== '[Interrupted]'
+          )
+
+          if (!hasRealAssistantResponse) {
+            const updatedBubble = {
+              ...prev[lastUserIdx],
+              text: (prev[lastUserIdx].text + ' ' + cleanedText).trim(),
+            }
+            const nextTranscript = [
+              ...prev.slice(0, lastUserIdx),
+              updatedBubble,
+              // Keep any [Interrupted] stubs that were after the user bubble
+              ...prev.slice(lastUserIdx + 1),
+            ]
+            console.log('[InterviewContext] appended to existing user bubble:', nextTranscript)
+            return nextTranscript
+          }
+        }
+
+        const nextTranscript = [...prev, { role: 'user', text: cleanedText }]
+        console.log('[InterviewContext] created new user transcript bubble:', nextTranscript)
+        return nextTranscript
       })
     })
 
@@ -76,6 +100,12 @@ export function InterviewProvider({ children }) {
     on('turn_complete', (msg) => {
       console.log('[InterviewContext] turn_complete event:', msg)
       setTranscript((prev) => {
+        // Suppress bare [Interrupted] messages — they are noise from premature
+        // cancellations and should not pollute the chat transcript.
+        if (!msg.full_response || msg.full_response === '[Interrupted]') {
+          console.log('[InterviewContext] suppressing [Interrupted] turn_complete from transcript')
+          return prev
+        }
         const nextTranscript = [...prev, { role: 'assistant', text: msg.full_response }]
         console.log('[InterviewContext] transcript state after turn complete:', nextTranscript)
         return nextTranscript

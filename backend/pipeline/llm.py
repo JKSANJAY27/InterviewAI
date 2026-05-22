@@ -60,6 +60,12 @@ class OllamaLLM:
             "options": {
                 "temperature": 0.7,
                 "top_p": 0.9,
+                # Bound the KV context window to match our 4-turn history \u2014 this
+                # avoids Ollama allocating a large cache and speeds up prefill.
+                "num_ctx": 2048,
+                # Hard cap on output tokens. Our system prompt says 1-3 sentences;
+                # this enforces it at the model level, cutting generation time.
+                "num_predict": 120,
             }
         }
 

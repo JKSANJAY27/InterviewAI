@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # LLM
     ollama_base_url: str = Field("http://localhost:11434", env="OLLAMA_BASE_URL")
     ollama_model: str = Field("llama3.2:3b", env="OLLAMA_MODEL")
+    # Separate, higher-quality model used only for post-interview feedback analysis.
+    # gemma4:e4b is already installed and has better analytical reasoning than llama3.2:3b.
+    feedback_model: str = Field("gemma4:e4b", env="FEEDBACK_MODEL")
 
     # Server
     host: str = Field("0.0.0.0", env="HOST")

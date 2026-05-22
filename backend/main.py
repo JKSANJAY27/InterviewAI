@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from api.health import router as health_router
 from api.metrics import router as metrics_router
+from api.feedback import router as feedback_router
 from telemetry.store import store
 from telemetry.tracker import tracker
 
@@ -32,6 +33,38 @@ async def lifespan(app: FastAPI):
     # Initialize telemetry DB
     await store.init_db()
     
+    # ── Ollama model warm-up ─────────────────────────────────────────────────
+    # On the very first request Ollama has to load the model weights from disk
+    # into memory, causing a cold-start latency of 60-120 seconds.  We
+    # fire a minimal 1-token request here at startup so that by the time the
+    # first real user connects the model is already resident in memory.
+    logger.info("Warming up Ollama model '%s' (this may take 30-60s on first boot)...",
+                settings.ollama_model)
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=120.0) as _warmup_client:
+            _warmup_payload = {
+                "model": settings.ollama_model,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user",   "content": "Hello"},
+                ],
+                "stream": False,
+                "options": {"num_predict": 1},  # 1 token is enough to load the model
+            }
+            _warmup_resp = await _warmup_client.post(
+                f"{settings.ollama_base_url.rstrip('/')}/api/chat",
+                json=_warmup_payload,
+            )
+            if _warmup_resp.status_code == 200:
+                logger.info("Ollama warm-up complete — model is resident in memory")
+            else:
+                logger.warning("Ollama warm-up returned HTTP %d — first turn may be slow",
+                               _warmup_resp.status_code)
+    except Exception as _exc:
+        logger.warning("Ollama warm-up failed (non-fatal, first turn may still be slow): %s", _exc)
+    # ─────────────────────────────────────────────────────────────────────────
+    
     yield
     logger.info("InterviewAI backend shutting down")
 
@@ -53,6 +86,7 @@ app.add_middleware(
 
 app.include_router(health_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
 
 
 @app.websocket("/ws/{session_id}")
@@ -78,8 +112,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
     async def trigger_llm_after_debounce():
         nonlocal accumulated_user_text, llm_task
-        # 1.2s silence threshold before triggering LLM
-        await asyncio.sleep(1.2)
+        # 2.5s silence threshold — long enough to allow natural speech pauses
+        # without prematurely triggering the LLM and then immediately cancelling it.
+        await asyncio.sleep(2.5)
         
         user_text = " ".join(accumulated_user_text).strip()
         accumulated_user_text = []
@@ -130,7 +165,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     await websocket.send_json(event.model_dump())
                     yield token
 
-            # Stream audio from TTS
+            # Stream audio from TTS — mark session as SPEAKING so on_asr_event
+            # knows the interviewer is actively playing audio and may be interrupted.
+            chat_session.state = TurnState.SPEAKING
             await websocket.send_json({"type": "status", "state": "speaking", "message": "Speaking..."})
             chunk_idx = 0
             tracker.record_tts_request(session_id)
@@ -159,6 +196,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             latency_dict = budget.to_breakdown() if budget else {}
             if budget:
                 await store.save_turn(budget)
+            
+            # Persist conversation text for feedback generation
+            await store.save_conversation_turn(session_id, user_text, full_response)
             
             event = TurnCompleteEvent(
                 turn_id=current_turn_id,
@@ -192,9 +232,11 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         event_type = msg_dict["type"]
         event_obj = msg_dict["event"]
         
-        # Immediate interruption: cancel active LLM generation upon detecting user speech
-        if llm_task and not llm_task.done():
-            logger.info("[%s] Immediate interruption: cancelling active LLM generation", session_id)
+        # Only cancel LLM if the interviewer is ACTIVELY SPEAKING audio to the user.
+        # During THINKING phase we let the LLM keep running — the user's words are just
+        # being accumulated for the next turn debounce, not an interruption.
+        if llm_task and not llm_task.done() and chat_session.state == TurnState.SPEAKING:
+            logger.info("[%s] User interrupted interviewer audio — cancelling LLM/TTS task", session_id)
             llm_task.cancel()
             
         # Fire-and-forget sending to client (since callback is synchronous)

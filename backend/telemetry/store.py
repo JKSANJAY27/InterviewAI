@@ -1,7 +1,7 @@
 import aiosqlite
 import json
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 from models.events import LatencyBudget
 
@@ -18,6 +18,7 @@ class TelemetryStore:
 
     async def init_db(self):
         async with aiosqlite.connect(self.db_path) as db:
+            # ── Latency telemetry ─────────────────────────────────────
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS turns (
@@ -34,8 +35,34 @@ class TelemetryStore:
                 )
                 """
             )
+            # ── Conversation transcript (text per turn) ───────────────
+            # Stored separately from telemetry so it can be read by the
+            # feedback generator without pulling heavyweight latency data.
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL
+                )
+                """
+            )
+            # ── Generated feedback reports ────────────────────────────
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS feedback (
+                    session_id TEXT PRIMARY KEY,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    feedback_json TEXT NOT NULL
+                )
+                """
+            )
             await db.commit()
             logger.info("Telemetry database initialized at %s", self.db_path)
+
+    # ── Latency turns ─────────────────────────────────────────────────────────
 
     async def save_turn(self, budget: LatencyBudget):
         breakdown = budget.to_breakdown()
@@ -90,4 +117,69 @@ class TelemetryStore:
                 row = await cursor.fetchone()
                 return dict(row) if row else {}
 
+    # ── Conversation transcript ───────────────────────────────────────────────
+
+    async def save_conversation_turn(
+        self, session_id: str, user_text: str, assistant_text: str
+    ) -> None:
+        """Persist a completed turn's raw text for feedback generation."""
+        if not user_text.strip() and not assistant_text.strip():
+            return
+        async with aiosqlite.connect(self.db_path) as db:
+            if user_text.strip():
+                await db.execute(
+                    "INSERT INTO conversations (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, "user", user_text.strip())
+                )
+            if assistant_text.strip():
+                await db.execute(
+                    "INSERT INTO conversations (session_id, role, content) VALUES (?, ?, ?)",
+                    (session_id, "assistant", assistant_text.strip())
+                )
+            await db.commit()
+
+    async def get_session_transcript(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return ordered list of {role, content} dicts for a session."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT role, content FROM conversations WHERE session_id = ? ORDER BY id ASC",
+                (session_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    # ── Feedback ──────────────────────────────────────────────────────────────
+
+    async def save_feedback(self, session_id: str, feedback: Dict[str, Any]) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO feedback (session_id, feedback_json)
+                VALUES (?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    feedback_json = excluded.feedback_json,
+                    timestamp = CURRENT_TIMESTAMP
+                """,
+                (session_id, json.dumps(feedback))
+            )
+            await db.commit()
+
+    async def get_feedback(self, session_id: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT feedback_json, timestamp FROM feedback WHERE session_id = ?",
+                (session_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        "feedback": json.loads(row["feedback_json"]),
+                        "generated_at": row["timestamp"],
+                    }
+                return None
+
+
 store = TelemetryStore()
+
