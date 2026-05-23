@@ -22,6 +22,12 @@ export function InterviewProvider({ children }) {
   const [streamingText, setStreamingText] = useState('')
   const [interviewType, setInterviewType] = useState('general')
   const [customInstructions, setCustomInstructions] = useState('')
+  const [voiceId, setVoiceIdState] = useState(localStorage.getItem('interview_voice_id') || 'pNInz6obpgDQGcFmaJgB')
+
+  const setVoiceId = useCallback((id) => {
+    localStorage.setItem('interview_voice_id', id)
+    setVoiceIdState(id)
+  }, [])
 
   const { connect, disconnect, sendJson, sendBinary, connected, on } = useWebSocket()
 
@@ -133,9 +139,10 @@ export function InterviewProvider({ children }) {
         type: 'session_config',
         interview_type: interviewType,
         custom_instructions: customInstructions,
+        voice_id: voiceId,
       })
     }
-  }, [connected, sendJson, interviewType, customInstructions])
+  }, [connected, sendJson, interviewType, customInstructions, voiceId])
 
   const handleConnect = useCallback(() => {
     connect(sessionId)
@@ -172,6 +179,8 @@ export function InterviewProvider({ children }) {
         setInterviewType,
         customInstructions,
         setCustomInstructions,
+        voiceId,
+        setVoiceId,
         handleConnect,
         handleDisconnect,
       }}

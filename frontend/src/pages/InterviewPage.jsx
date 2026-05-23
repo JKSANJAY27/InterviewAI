@@ -116,6 +116,39 @@ const INTERVIEW_TYPES = [
   }
 ]
 
+const VOICES = [
+  {
+    id: 'pNInz6obpgDQGcFmaJgB',
+    name: 'Adam',
+    gender: 'male',
+    desc: 'Deep, structured, and authoritative. Best for mock technical leads and system architectural deep dives.'
+  },
+  {
+    id: '21m00Tcm4TlvDq8ikWAM',
+    name: 'Rachel',
+    gender: 'female',
+    desc: 'Calm, highly professional, and encouraging. Excellent for multi-disciplinary software engineering rounds.'
+  },
+  {
+    id: '29vD33N1CtxCmqQRPOHJ',
+    name: 'Drew',
+    gender: 'male',
+    desc: 'Casual, conversational, and energetic. Standard mock behavioral round persona.'
+  },
+  {
+    id: '2EiwWnXF2V4j26dxz2i5',
+    name: 'Clyde',
+    gender: 'male',
+    desc: 'Smooth, highly articulate, and technical. Ideal for structured algorithm and coding evaluation.'
+  },
+  {
+    id: 'piTKgcLEGmPEe24245c5',
+    name: 'Nicole',
+    gender: 'female',
+    desc: 'Crisp, fast-paced, and sharp. Perfect for rapid-fire Q&A and technical accuracy assessments.'
+  }
+]
+
 export default function InterviewPage() {
   const {
     sessionState,
@@ -127,6 +160,8 @@ export default function InterviewPage() {
     setInterviewType,
     customInstructions,
     setCustomInstructions,
+    voiceId,
+    setVoiceId,
     handleConnect,
     handleDisconnect,
   } = useInterview()
@@ -214,7 +249,28 @@ export default function InterviewPage() {
                 </div>
 
                 <div className="setup-section">
-                  <label className="section-label">2. Custom Focus & Directives (Optional)</label>
+                  <label className="section-label">2. Interviewer Voice Profile</label>
+                  <div className="voice-grid">
+                    {VOICES.map((v) => (
+                      <div
+                        key={v.id}
+                        className={`voice-card ${voiceId === v.id ? 'active' : ''}`}
+                        onClick={() => setVoiceId(v.id)}
+                      >
+                        <div className="voice-avatar">
+                          <span>{v.gender === 'female' ? '👩' : '👨'}</span>
+                        </div>
+                        <div className="voice-info">
+                          <span className="voice-name">{v.name}</span>
+                          <span className="voice-desc">{v.desc}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="setup-section">
+                  <label className="section-label">3. Custom Focus & Directives (Optional)</label>
                   <textarea
                     className="custom-textarea"
                     placeholder="e.g., 'Act as a principal engineer at Netflix. Challenge my choices on data modeling and caching.' or 'Evaluate my frontend skills specifically around hydration and layout shifts.'"

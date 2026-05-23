@@ -180,6 +180,26 @@ class TelemetryStore:
                     }
                 return None
 
+    async def get_all_sessions(self) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT 
+                    c.session_id,
+                    MIN(c.timestamp) as started_at,
+                    COUNT(c.id) as message_count,
+                    CASE WHEN f.session_id IS NOT NULL THEN 1 ELSE 0 END as has_feedback
+                FROM conversations c
+                LEFT JOIN feedback f ON c.session_id = f.session_id
+                GROUP BY c.session_id
+                ORDER BY started_at DESC
+                """
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+
 
 store = TelemetryStore()
 

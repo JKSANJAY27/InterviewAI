@@ -52,7 +52,7 @@ const SCORE_LABELS = {
 }
 
 // ── FeedbackCard component ────────────────────────────────────────────────────
-function FeedbackCard({ feedback, generatedAt }) {
+function FeedbackCard({ feedback, generatedAt, onExportPDF, onExportMarkdown, onExportJSON }) {
   const scores = feedback.scores || {}
   const labels  = Object.keys(scores).map(k => SCORE_LABELS[k] || k)
   const values  = Object.values(scores)
@@ -99,9 +99,22 @@ function FeedbackCard({ feedback, generatedAt }) {
             Overall: {overall}/10
           </span>
         </div>
-        {generatedAt && (
-          <p className="feedback-meta">Generated {new Date(generatedAt).toLocaleString()}</p>
-        )}
+        <div className="feedback-meta-row">
+          {generatedAt && (
+            <p className="feedback-meta">Generated {new Date(generatedAt).toLocaleString()}</p>
+          )}
+          <div className="feedback-actions no-print">
+            <button className="btn btn--outline btn--sm feedback-action-btn" onClick={onExportPDF}>
+              📄 Export PDF Report
+            </button>
+            <button className="btn btn--outline btn--sm feedback-action-btn" onClick={onExportMarkdown}>
+              💾 Export Markdown
+            </button>
+            <button className="btn btn--outline btn--sm feedback-action-btn" onClick={onExportJSON}>
+              💾 Export JSON
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="feedback-body">
@@ -199,7 +212,7 @@ function FeedbackSkeleton() {
         </div>
       </div>
       <p className="skeleton-generating">
-        <span className="dot" /> Analysing interview with Gemma 4…
+        <span className="dot" /> Analysing interview with Llama 3.2…
       </p>
     </div>
   )
@@ -207,10 +220,14 @@ function FeedbackSkeleton() {
 
 // ── Main Dashboard Page ───────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const { sessionId } = useInterview()
+  const { sessionId: activeSessionId } = useInterview()
 
   const [summary, setSummary] = useState(null)
+  const [sessions, setSessions] = useState([])
+  const [selectedSessionId, setSelectedSessionId] = useState(activeSessionId)
+  
   const [turns, setTurns] = useState([])
+  const [transcriptData, setTranscriptData] = useState([])
   const [selectedTurnId, setSelectedTurnId] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -221,64 +238,125 @@ export default function DashboardPage() {
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   const [feedbackError, setFeedbackError] = useState(null)
 
-  const pollInterval = useRef(null)
-
-  const fetchData = useCallback(async () => {
+  // Sessions list fetching
+  const fetchSessionsList = useCallback(async () => {
     try {
-      const summaryRes = await fetch(`${API}/metrics/summary`)
-      if (summaryRes.ok) {
-        const d = await summaryRes.json()
-        setSummary(d.summary)
+      const res = await fetch(`${API}/metrics/sessions`)
+      if (res.ok) {
+        const d = await res.json()
+        setSessions(d.sessions || [])
       }
-      if (sessionId) {
-        const turnsRes = await fetch(`${API}/metrics/sessions/${sessionId}/turns`)
-        if (turnsRes.ok) {
-          const d = await turnsRes.json()
-          const fetchedTurns = d.turns || []
-          setTurns(fetchedTurns)
-          if (fetchedTurns.length > 0) {
-            setSelectedTurnId(prev => {
-              const exists = fetchedTurns.some(t => t.turn_id === prev)
-              return exists ? prev : fetchedTurns[fetchedTurns.length - 1].turn_id
-            })
-          }
-        }
+    } catch (err) {
+      console.error('Error fetching sessions list:', err)
+    }
+  }, [])
+
+  // Global summary metrics
+  const fetchSummary = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/metrics/summary`)
+      if (res.ok) {
+        const d = await res.json()
+        setSummary(d.summary)
       }
       setError(null)
     } catch (err) {
-      console.error('Error fetching metrics:', err)
+      console.error('Error fetching summary:', err)
       setError('Unable to reach telemetry service.')
     } finally {
       setLoading(false)
     }
-  }, [sessionId])
+  }, [])
 
-  // Load any existing feedback for this session on mount
-  const fetchExistingFeedback = useCallback(async () => {
-    if (!sessionId) return
+  // Detailed turn, feedback and transcript telemetry for a specific session ID
+  const fetchSessionDetails = useCallback(async (id) => {
+    if (!id) return
     try {
-      const res = await fetch(`${API}/feedback/sessions/${sessionId}`)
-      if (res.ok) {
-        const d = await res.json()
+      // 1. Fetch turns
+      const turnsRes = await fetch(`${API}/metrics/sessions/${id}/turns`)
+      if (turnsRes.ok) {
+        const d = await turnsRes.json()
+        const fetchedTurns = d.turns || []
+        setTurns(fetchedTurns)
+        if (fetchedTurns.length > 0) {
+          setSelectedTurnId(prev => {
+            const exists = fetchedTurns.some(t => t.turn_id === prev)
+            return exists ? prev : fetchedTurns[fetchedTurns.length - 1].turn_id
+          })
+        } else {
+          setTurns([])
+          setSelectedTurnId('')
+        }
+      }
+
+      // 2. Fetch feedback
+      const feedbackRes = await fetch(`${API}/feedback/sessions/${id}`)
+      if (feedbackRes.ok) {
+        const d = await feedbackRes.json()
         setFeedback(d.feedback)
         setFeedbackGeneratedAt(d.generated_at)
+      } else {
+        setFeedback(null)
+        setFeedbackGeneratedAt(null)
       }
-    } catch { /* no stored feedback yet — that's fine */ }
-  }, [sessionId])
 
+      // 3. Fetch transcript
+      const transcriptRes = await fetch(`${API}/metrics/sessions/${id}/transcript`)
+      if (transcriptRes.ok) {
+        const d = await transcriptRes.json()
+        setTranscriptData(d.transcript || [])
+      } else {
+        setTranscriptData([])
+      }
+      
+      setFeedbackError(null)
+    } catch (err) {
+      console.error('Error fetching session details:', err)
+    }
+  }, [])
+
+  // On activeSessionId change, make it the selected session by default
   useEffect(() => {
-    fetchData()
-    fetchExistingFeedback()
-    pollInterval.current = setInterval(fetchData, 3000)
-    return () => { if (pollInterval.current) clearInterval(pollInterval.current) }
-  }, [fetchData, fetchExistingFeedback])
+    setSelectedSessionId(activeSessionId)
+  }, [activeSessionId])
+
+  // Periodic polling for global summary and session list
+  useEffect(() => {
+    fetchSummary()
+    fetchSessionsList()
+    
+    const interval = setInterval(() => {
+      fetchSummary()
+      fetchSessionsList()
+    }, 4000)
+    
+    return () => clearInterval(interval)
+  }, [fetchSummary, fetchSessionsList])
+
+  // Load session specific telemetry whenever selection changes
+  useEffect(() => {
+    if (selectedSessionId) {
+      fetchSessionDetails(selectedSessionId)
+    }
+  }, [selectedSessionId, fetchSessionDetails])
+
+  // If viewing active session, poll turns and transcript to show real-time telemetry updates
+  useEffect(() => {
+    if (!selectedSessionId || selectedSessionId !== activeSessionId) return
+    
+    const interval = setInterval(() => {
+      fetchSessionDetails(selectedSessionId)
+    }, 3000)
+    
+    return () => clearInterval(interval)
+  }, [selectedSessionId, activeSessionId, fetchSessionDetails])
 
   const handleGenerateFeedback = async () => {
-    if (!sessionId) return
+    if (!selectedSessionId) return
     setFeedbackLoading(true)
     setFeedbackError(null)
     try {
-      const res = await fetch(`${API}/feedback/sessions/${sessionId}/generate`, {
+      const res = await fetch(`${API}/feedback/sessions/${selectedSessionId}/generate`, {
         method: 'POST',
       })
       if (!res.ok) {
@@ -288,11 +366,49 @@ export default function DashboardPage() {
       const d = await res.json()
       setFeedback(d.feedback)
       setFeedbackGeneratedAt(new Date().toISOString())
+      
+      // Reload details and list
+      fetchSessionDetails(selectedSessionId)
+      fetchSessionsList()
     } catch (err) {
       setFeedbackError(err.message)
     } finally {
       setFeedbackLoading(false)
     }
+  }
+
+  const exportMarkdown = () => {
+    if (!transcriptData || transcriptData.length === 0) return
+    const text = transcriptData.map(t => `${t.role === 'user' ? 'Candidate' : 'Interviewer'}: ${t.content}\n`).join('\n')
+    const blob = new Blob([`# Interview Transcript - Session ${selectedSessionId}\n\n${text}`], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `interview_transcript_${selectedSessionId.slice(0, 8)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportJSON = () => {
+    if (!transcriptData || transcriptData.length === 0) return
+    const blob = new Blob([JSON.stringify(transcriptData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `interview_transcript_${selectedSessionId.slice(0, 8)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportPDF = () => {
+    const originalTitle = document.title
+    document.title = `InterviewAI_Report_${selectedSessionId.slice(0, 8)}`
+    window.print()
+    document.title = originalTitle
+  }
+
+  const handleSelectSession = (id) => {
+    setSelectedSessionId(id)
   }
 
   const selectedTurn = turns.find(t => t.turn_id === selectedTurnId)
@@ -370,138 +486,228 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="dashboard-page">
-      <div className="dashboard-header">
-        <h1 className="dashboard-title">Latency Analytics</h1>
-        <p className="dashboard-sub">
-          Real-time breakdown of ASR · LLM · TTS latency per interview turn
-        </p>
-      </div>
+    <main className="dashboard-container">
+      {/* Sidebar - Sessions Panel */}
+      <aside className="dashboard-sidebar no-print">
+        <div className="sidebar-header">
+          <h2 className="sidebar-title">Sessions list</h2>
+          <p className="sidebar-subtitle">Review historical telemetry</p>
+        </div>
+        <div className="sidebar-list">
+          {/* Active Session card */}
+          {activeSessionId && (
+            <div
+              className={`session-item active-session-item ${selectedSessionId === activeSessionId ? 'selected' : ''}`}
+              onClick={() => handleSelectSession(activeSessionId)}
+            >
+              <div className="session-item-header">
+                <span className="session-icon">⚡</span>
+                <span className="session-title">Active Session</span>
+              </div>
+              <div className="session-item-footer">
+                <span className="session-id-text">{activeSessionId.slice(0, 8)}...</span>
+                <span className="session-status-badge">Live</span>
+              </div>
+            </div>
+          )}
 
-      {error && (
-        <div className="dashboard-error">
-          <span className="badge badge--red">{error}</span>
+          <div className="sidebar-divider">Past Sessions</div>
+          {sessions.length === 0 || (sessions.length === 1 && sessions[0].session_id === activeSessionId) ? (
+            <p className="sidebar-empty">No historical sessions found</p>
+          ) : (
+            sessions.map((s) => {
+              // Skip if it is the current active session
+              if (s.session_id === activeSessionId) return null
+              
+              const dateStr = s.started_at ? new Date(s.started_at + 'Z').toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              }) : 'Unknown Date'
+              const isSelected = selectedSessionId === s.session_id
+              
+              return (
+                <div
+                  key={s.session_id}
+                  className={`session-item ${isSelected ? 'selected' : ''}`}
+                  onClick={() => handleSelectSession(s.session_id)}
+                >
+                  <div className="session-item-header">
+                    <span className="session-date">{dateStr}</span>
+                    {s.has_feedback === 1 && (
+                      <span className="feedback-badge-dot" title="Feedback report generated">✦</span>
+                    )}
+                  </div>
+                  <div className="session-item-footer">
+                    <span className="session-id-text">{s.session_id.slice(0, 8)}...</span>
+                    <span className="session-turns-count">{Math.ceil(s.message_count / 2)} turns</span>
+                  </div>
+                </div>
+              )
+            })
+          )}
         </div>
-      )}
+      </aside>
 
-      {/* Aggregate Stats */}
-      <div className="dashboard-grid">
-        <div className="card stat-card">
-          <span className="stat-label">Total Turns</span>
-          <span className="stat-value">{summary?.total_turns ?? '0'}</span>
+      {/* Main dashboard content area */}
+      <section className="dashboard-content">
+        <div className="dashboard-header no-print">
+          <h1 className="dashboard-title">Latency Analytics</h1>
+          <p className="dashboard-sub">
+            Real-time breakdown of ASR · LLM · TTS latency per interview turn
+          </p>
         </div>
-        <div className="card stat-card">
-          <span className="stat-label">Avg E2E Latency</span>
-          <span className="stat-value">{summary?.avg_total ? `${summary.avg_total.toFixed(0)}ms` : '—'}</span>
-        </div>
-        <div className="card stat-card">
-          <span className="stat-label">Avg ASR Latency</span>
-          <span className="stat-value">{summary?.avg_asr ? `${summary.avg_asr.toFixed(0)}ms` : '—'}</span>
-        </div>
-        <div className="card stat-card">
-          <span className="stat-label">Avg LLM TTFT</span>
-          <span className="stat-value">{summary?.avg_llm ? `${summary.avg_llm.toFixed(0)}ms` : '—'}</span>
-        </div>
-      </div>
 
-      {/* Charts */}
-      <div className="dashboard-charts">
-        {/* Waterfall */}
-        <div className="card chart-card">
-          <div className="chart-header">
-            <h3 className="chart-title">Latency Waterfall</h3>
-            {turns.length > 0 && (
-              <select
-                className="turn-selector"
-                value={selectedTurnId}
-                onChange={e => setSelectedTurnId(e.target.value)}
-              >
-                {turns.map((t, idx) => (
-                  <option key={t.turn_id} value={t.turn_id}>
-                    Turn {idx + 1} ({t.total_ms ? `${t.total_ms.toFixed(0)}ms` : 'N/A'})
-                  </option>
+        {error && (
+          <div className="dashboard-error no-print">
+            <span className="badge badge--red">{error}</span>
+          </div>
+        )}
+
+        {/* Aggregate Stats */}
+        <div className="dashboard-grid no-print">
+          <div className="card stat-card">
+            <span className="stat-label">Total Turns</span>
+            <span className="stat-value">{summary?.total_turns ?? '0'}</span>
+          </div>
+          <div className="card stat-card">
+            <span className="stat-label">Avg E2E Latency</span>
+            <span className="stat-value">{summary?.avg_total ? `${summary.avg_total.toFixed(0)}ms` : '—'}</span>
+          </div>
+          <div className="card stat-card">
+            <span className="stat-label">Avg ASR Latency</span>
+            <span className="stat-value">{summary?.avg_asr ? `${summary.avg_asr.toFixed(0)}ms` : '—'}</span>
+          </div>
+          <div className="card stat-card">
+            <span className="stat-label">Avg LLM TTFT</span>
+            <span className="stat-value">{summary?.avg_llm ? `${summary.avg_llm.toFixed(0)}ms` : '—'}</span>
+          </div>
+        </div>
+
+        {/* Charts */}
+        <div className="dashboard-charts no-print">
+          {/* Waterfall */}
+          <div className="card chart-card">
+            <div className="chart-header">
+              <h3 className="chart-title">Latency Waterfall</h3>
+              {turns.length > 0 && (
+                <select
+                  className="turn-selector"
+                  value={selectedTurnId}
+                  onChange={e => setSelectedTurnId(e.target.value)}
+                >
+                  {turns.map((t, idx) => (
+                    <option key={t.turn_id} value={t.turn_id}>
+                      Turn {idx + 1} ({t.total_ms ? `${t.total_ms.toFixed(0)}ms` : 'N/A'})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div className="chart-container">
+              {selectedTurn ? (
+                <Bar data={waterfallData} options={waterfallOptions} />
+              ) : (
+                <div className="chart-empty">
+                  <span>No turn data selected</span>
+                  <span className="hint">Complete a turn in the voice interview page to see the breakdown</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Time Series */}
+          <div className="card chart-card">
+            <div className="chart-header">
+              <h3 className="chart-title">E2E Latency Over Time</h3>
+            </div>
+            <div className="chart-container">
+              {turns.length > 0 ? (
+                <Line data={timeSeriesData} options={timeSeriesOptions} />
+              ) : (
+                <div className="chart-empty">
+                  <span>No history available</span>
+                  <span className="hint">Data will populate as you conduct turns during this session</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Feedback Section ─────────────────────────────────────────────── */}
+        <div className="feedback-section-wrap">
+          <div className="feedback-section-header no-print">
+            <div>
+              <h2 className="feedback-section-title-main">Performance Feedback</h2>
+              <p className="feedback-section-sub">
+                AI-generated evaluation of your interview using Llama 3.2 · persisted per session
+              </p>
+            </div>
+            <button
+              id="generate-feedback-btn"
+              className="btn btn--primary feedback-generate-btn"
+              onClick={handleGenerateFeedback}
+              disabled={feedbackLoading || turns.length < 2}
+              title={turns.length < 2 ? 'Complete at least 2 turns first' : 'Generate feedback report'}
+            >
+              {feedbackLoading ? (
+                <>
+                  <span className="dot" />
+                  Analysing…
+                </>
+              ) : feedback ? (
+                '↺ Regenerate Feedback'
+              ) : (
+                '✦ Generate Feedback Report'
+              )}
+            </button>
+          </div>
+
+          {feedbackError && (
+            <div className="feedback-error no-print">
+              <span className="badge badge--red">⚠ {feedbackError}</span>
+            </div>
+          )}
+
+          {feedbackLoading && <FeedbackSkeleton />}
+
+          {!feedbackLoading && feedback && (
+            <FeedbackCard
+              feedback={feedback}
+              generatedAt={feedbackGeneratedAt}
+              onExportPDF={handleExportPDF}
+              onExportMarkdown={exportMarkdown}
+              onExportJSON={exportJSON}
+            />
+          )}
+
+          {!feedbackLoading && !feedback && !feedbackError && (
+            <div className="feedback-empty no-print">
+              <div className="feedback-empty-icon">✦</div>
+              <p>Complete your interview session and click <strong>Generate Feedback Report</strong> to get a detailed performance analysis.</p>
+            </div>
+          )}
+          
+          {/* Read-only printable evaluation transcript */}
+          {!feedbackLoading && feedback && transcriptData.length > 0 && (
+            <div className="eval-transcript-section card">
+              <h3 className="eval-transcript-title">Interview Transcript</h3>
+              <div className="eval-transcript-list">
+                {transcriptData.map((turn, i) => (
+                  <div key={i} className={`eval-turn eval-turn--${turn.role}`}>
+                    <span className="eval-turn-role">
+                      {turn.role === 'user' ? 'Candidate' : 'Interviewer'}
+                    </span>
+                    <p className="eval-turn-text">{turn.content}</p>
+                  </div>
                 ))}
-              </select>
-            )}
-          </div>
-          <div className="chart-container">
-            {selectedTurn ? (
-              <Bar data={waterfallData} options={waterfallOptions} />
-            ) : (
-              <div className="chart-empty">
-                <span>No turn data selected</span>
-                <span className="hint">Complete a turn in the voice interview page to see the breakdown</span>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-
-        {/* Time Series */}
-        <div className="card chart-card">
-          <div className="chart-header">
-            <h3 className="chart-title">E2E Latency Over Time</h3>
-          </div>
-          <div className="chart-container">
-            {turns.length > 0 ? (
-              <Line data={timeSeriesData} options={timeSeriesOptions} />
-            ) : (
-              <div className="chart-empty">
-                <span>No history available</span>
-                <span className="hint">Data will populate as you conduct turns during this session</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Feedback Section ─────────────────────────────────────────────── */}
-      <div className="feedback-section-wrap">
-        <div className="feedback-section-header">
-          <div>
-            <h2 className="feedback-section-title-main">Performance Feedback</h2>
-            <p className="feedback-section-sub">
-              AI-generated evaluation of your interview using Gemma 4 · persisted per session
-            </p>
-          </div>
-          <button
-            id="generate-feedback-btn"
-            className="btn btn--primary feedback-generate-btn"
-            onClick={handleGenerateFeedback}
-            disabled={feedbackLoading || turns.length < 2}
-            title={turns.length < 2 ? 'Complete at least 2 turns first' : 'Generate feedback report'}
-          >
-            {feedbackLoading ? (
-              <>
-                <span className="dot" />
-                Analysing…
-              </>
-            ) : feedback ? (
-              '↺ Regenerate Feedback'
-            ) : (
-              '✦ Generate Feedback Report'
-            )}
-          </button>
-        </div>
-
-        {feedbackError && (
-          <div className="feedback-error">
-            <span className="badge badge--red">⚠ {feedbackError}</span>
-          </div>
-        )}
-
-        {feedbackLoading && <FeedbackSkeleton />}
-
-        {!feedbackLoading && feedback && (
-          <FeedbackCard feedback={feedback} generatedAt={feedbackGeneratedAt} />
-        )}
-
-        {!feedbackLoading && !feedback && !feedbackError && (
-          <div className="feedback-empty">
-            <div className="feedback-empty-icon">✦</div>
-            <p>Complete your interview session and click <strong>Generate Feedback Report</strong> to get a detailed performance analysis.</p>
-          </div>
-        )}
-      </div>
+      </section>
     </main>
   )
 }
+

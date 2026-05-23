@@ -290,7 +290,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if msg.get("type") == "session_config":
                     chat_session.interview_type = msg.get("interview_type", "general")
                     chat_session.custom_instructions = msg.get("custom_instructions", "")
-                    logger.info("[%s] Configured session: type=%s, instructions=%s", session_id, chat_session.interview_type, chat_session.custom_instructions)
+                    
+                    voice_id = msg.get("voice_id")
+                    if voice_id:
+                        tts.voice_id = voice_id
+                        
+                    logger.info("[%s] Configured session: type=%s, instructions=%s, voice=%s", 
+                                session_id, chat_session.interview_type, chat_session.custom_instructions, tts.voice_id)
                     
                     # Personalized initial greetings
                     greetings = {
