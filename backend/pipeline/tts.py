@@ -53,6 +53,8 @@ class ElevenLabsTTS:
         
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json=data, timeout=15.0)
+            if response.status_code != 200:
+                logger.error("[%s] ElevenLabs API failed with status %d: %s", self.session_id, response.status_code, response.text)
             response.raise_for_status()
             # Yield the entire MP3 file for this sentence as a single chunk
             yield response.content
