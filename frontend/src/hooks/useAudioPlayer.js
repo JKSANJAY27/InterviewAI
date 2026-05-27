@@ -20,6 +20,10 @@ export function useAudioPlayer() {
     if (!audioContext.current) return
 
     try {
+      if (audioContext.current.state === 'suspended') {
+        await audioContext.current.resume()
+      }
+      
       // Convert base64 to binary ArrayBuffer
       const binaryString = atob(base64String)
       const len = binaryString.length
