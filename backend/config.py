@@ -9,12 +9,15 @@ class Settings(BaseSettings):
     # TTS
     elevenlabs_api_key: str = Field(..., env="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str = Field(
-        "21m00Tcm4TlvDq8ikWAM", env="ELEVENLABS_VOICE_ID"
+        "pNInz6obpgDQGcFmaJgB", env="ELEVENLABS_VOICE_ID"
     )
 
     # LLM
     ollama_base_url: str = Field("http://localhost:11434", env="OLLAMA_BASE_URL")
     ollama_model: str = Field("llama3.2:3b", env="OLLAMA_MODEL")
+    # Separate, higher-quality model used only for post-interview feedback analysis.
+    # We default this to llama3.2:3b to prevent high resource usage/laptop hangs on CPU-based systems.
+    feedback_model: str = Field("llama3.2:3b", env="FEEDBACK_MODEL")
 
     # Server
     host: str = Field("0.0.0.0", env="HOST")

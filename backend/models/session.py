@@ -28,6 +28,8 @@ class Session:
     conversation_history: list[dict] = field(default_factory=list)
     current_turn: Optional[Turn] = None
     total_turns: int = 0
+    interview_type: str = "general"
+    custom_instructions: str = ""
 
     def start_turn(self) -> Turn:
         self.current_turn = Turn()
@@ -48,6 +50,6 @@ class Session:
             self.current_turn = None
         self.state = TurnState.IDLE
 
-    def get_history_for_llm(self, max_turns: int = 10) -> list[dict]:
+    def get_history_for_llm(self, max_turns: int = 4) -> list[dict]:
         """Return last N turns to keep context window bounded."""
         return self.conversation_history[-(max_turns * 2):]
