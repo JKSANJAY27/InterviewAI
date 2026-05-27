@@ -155,3 +155,10 @@ npm run dev
 ```
 
 Navigate to `http://localhost:5173` to start the live simulation. Select your dynamic interviewer voice, connect your microphone, and begin the technical screening!
+
+<img width="1366" height="768" alt="Screenshot (212)" src="https://github.com/user-attachments/assets/f132e260-f437-49d8-8037-fc608713af2f" />
+<img width="1366" height="768" alt="Screenshot (213)" src="https://github.com/user-attachments/assets/cbe23b9b-974a-4824-87f3-f10ff7c3177e" />
+<img width="1366" height="768" alt="Screenshot (215)" src="https://github.com/user-attachments/assets/d7d3eee4-e5da-4889-848b-ca8e1cee4840" />
+
+https://interview-ai-ochre-gamma.vercel.app/
+(ElevenLabs speech to text doesnt work as it is in free tier, and it doesnt work in production)
